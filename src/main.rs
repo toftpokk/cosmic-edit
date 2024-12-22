@@ -442,6 +442,7 @@ pub struct App {
     find_replace_value: String,
     find_search_id: widget::Id,
     find_search_value: String,
+    find_search_regex: Option<regex::Regex>,
     git_project_status: Option<Vec<(String, PathBuf, Vec<GitStatus>)>>,
     projects: Vec<(String, PathBuf)>,
     project_search_id: widget::Id,
@@ -665,6 +666,7 @@ impl App {
                 tab.set_config(&self.config);
             }
         }
+        self.find_search_regex = None;
         cosmic::app::command::set_theme(self.config.app_theme.theme())
     }
 
@@ -1327,6 +1329,7 @@ impl Application for App {
             find_replace_value: String::new(),
             find_search_id: widget::Id::unique(),
             find_search_value: String::new(),
+            find_search_regex: None,
             git_project_status: None,
             projects: Vec::new(),
             project_search_id: widget::Id::unique(),
@@ -1710,21 +1713,27 @@ impl Application for App {
             }
             Message::FindNext => {
                 if !self.find_search_value.is_empty() {
+                    if self.find_search_regex.is_none() {
+                        self.find_search_regex =
+                            match self.config.find_regex(&self.find_search_value) {
+                                Ok(regex) => Some(regex),
+                                Err(err) => {
+                                    //TODO: put regex error in find box
+                                    log::warn!(
+                                        "failed to compile regex {:?}: {}",
+                                        self.find_search_value,
+                                        err
+                                    );
+                                    return self.update_focus();
+                                }
+                            }
+                    }
                     if let Some(Tab::Editor(tab)) = self.active_tab() {
-                        //TODO: do not compile find regex on every search?
-                        match self.config.find_regex(&self.find_search_value) {
-                            Ok(regex) => {
-                                tab.search(&regex, true, self.config.find_wrap_around);
-                            }
-                            Err(err) => {
-                                //TODO: put regex error in find box
-                                log::warn!(
-                                    "failed to compile regex {:?}: {}",
-                                    self.find_search_value,
-                                    err
-                                );
-                            }
-                        }
+                        tab.search(
+                            self.find_search_regex.as_ref().unwrap(),
+                            true,
+                            self.config.find_wrap_around,
+                        );
                     }
                 }
 
@@ -1733,21 +1742,27 @@ impl Application for App {
             }
             Message::FindPrevious => {
                 if !self.find_search_value.is_empty() {
+                    if self.find_search_regex.is_none() {
+                        self.find_search_regex =
+                            match self.config.find_regex(&self.find_search_value) {
+                                Ok(regex) => Some(regex),
+                                Err(err) => {
+                                    //TODO: put regex error in find box
+                                    log::warn!(
+                                        "failed to compile regex {:?}: {}",
+                                        self.find_search_value,
+                                        err
+                                    );
+                                    return self.update_focus();
+                                }
+                            }
+                    }
                     if let Some(Tab::Editor(tab)) = self.active_tab() {
-                        //TODO: do not compile find regex on every search?
-                        match self.config.find_regex(&self.find_search_value) {
-                            Ok(regex) => {
-                                tab.search(&regex, false, self.config.find_wrap_around);
-                            }
-                            Err(err) => {
-                                //TODO: put regex error in find box
-                                log::warn!(
-                                    "failed to compile regex {:?}: {}",
-                                    self.find_search_value,
-                                    err
-                                );
-                            }
-                        }
+                        tab.search(
+                            self.find_search_regex.as_ref().unwrap(),
+                            false,
+                            self.config.find_wrap_around,
+                        );
                     }
                 }
 
@@ -1756,27 +1771,29 @@ impl Application for App {
             }
             Message::FindReplace => {
                 if !self.find_search_value.is_empty() {
+                    if self.find_search_regex.is_none() {
+                        self.find_search_regex =
+                            match self.config.find_regex(&self.find_search_value) {
+                                Ok(regex) => Some(regex),
+                                Err(err) => {
+                                    //TODO: put regex error in find box
+                                    log::warn!(
+                                        "failed to compile regex {:?}: {}",
+                                        self.find_search_value,
+                                        err
+                                    );
+                                    return self.update_focus();
+                                }
+                            }
+                    }
                     if let Some(Tab::Editor(tab)) = self.active_tab() {
-                        //TODO: do not compile find regex on every search?
-                        match self.config.find_regex(&self.find_search_value) {
-                            Ok(regex) => {
-                                //TODO: support captures
-                                tab.replace(
-                                    &regex,
-                                    &self.find_replace_value,
-                                    self.config.find_wrap_around,
-                                );
-                                return self.update(Message::TabChanged(self.tab_model.active()));
-                            }
-                            Err(err) => {
-                                //TODO: put regex error in find box
-                                log::warn!(
-                                    "failed to compile regex {:?}: {}",
-                                    self.find_search_value,
-                                    err
-                                );
-                            }
-                        }
+                        //TODO: support captures
+                        tab.replace(
+                            self.find_search_regex.as_ref().unwrap(),
+                            &self.find_replace_value,
+                            self.config.find_wrap_around,
+                        );
+                        return self.update(Message::TabChanged(self.tab_model.active()));
                     }
                 }
 
@@ -1785,27 +1802,33 @@ impl Application for App {
             }
             Message::FindReplaceAll => {
                 if !self.find_search_value.is_empty() {
-                    if let Some(Tab::Editor(tab)) = self.active_tab() {
-                        //TODO: do not compile find regex on every search?
-                        match self.config.find_regex(&self.find_search_value) {
-                            Ok(regex) => {
-                                //TODO: support captures
-                                {
-                                    let mut editor = tab.editor.lock().unwrap();
-                                    editor.set_cursor(cosmic_text::Cursor::new(0, 0));
+                    if self.find_search_regex.is_none() {
+                        self.find_search_regex =
+                            match self.config.find_regex(&self.find_search_value) {
+                                Ok(r) => Some(r),
+                                Err(err) => {
+                                    //TODO: put regex error in find box
+                                    log::warn!(
+                                        "failed to compile regex {:?}: {}",
+                                        self.find_search_value,
+                                        err
+                                    );
+                                    return self.update_focus();
                                 }
-                                while tab.replace(&regex, &self.find_replace_value, false) {}
-                                return self.update(Message::TabChanged(self.tab_model.active()));
                             }
-                            Err(err) => {
-                                //TODO: put regex error in find box
-                                log::warn!(
-                                    "failed to compile regex {:?}: {}",
-                                    self.find_search_value,
-                                    err
-                                );
-                            }
+                    }
+                    if let Some(Tab::Editor(tab)) = self.active_tab() {
+                        //TODO: support captures
+                        {
+                            let mut editor = tab.editor.lock().unwrap();
+                            editor.set_cursor(cosmic_text::Cursor::new(0, 0));
                         }
+                        while tab.replace(
+                            self.find_search_regex.as_ref().unwrap(),
+                            &self.find_replace_value,
+                            false,
+                        ) {}
+                        return self.update(Message::TabChanged(self.tab_model.active()));
                     }
                 }
 
@@ -1817,6 +1840,7 @@ impl Application for App {
             }
             Message::FindSearchValueChanged(value) => {
                 self.find_search_value = value;
+                self.find_search_regex = None;
             }
             Message::FindUseRegex(find_use_regex) => {
                 self.config.find_use_regex = find_use_regex;
